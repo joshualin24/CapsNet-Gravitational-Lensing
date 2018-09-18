@@ -1,5 +1,6 @@
 import numpy as np
 import tensorflow as tf
+from tf_util import cost_tensor
 from model.baseline import Baseline
 
 
@@ -39,69 +40,70 @@ class CNNBaseline(Baseline):
     def _build_model(self):
         """Build the core model within the graph."""
 
-        filters = [1, 256, 256, 128]
+        filters = [1, 128, 128, 64]
         assert isinstance(filters, list)
-        strides = [1]
+        strides = [5,1]
         assert isinstance(strides, list)
-        cnn_kernel_size = 5
-        assert isinstance(cnn_kernel_size, int)
+        cnn_kernel_size = [9,3]
+        assert isinstance(cnn_kernel_size, list)
         padding = self.hps.padding
 
         with tf.variable_scope('init'):
             x = self.images
             x = self._batch_norm('bn', x)
-            x = self._conv('conv', x, cnn_kernel_size,
+            x = self._conv('conv', x, cnn_kernel_size[0],
                            filters[0], filters[1], self._stride_arr(strides[0]), padding=padding)
             x = self._relu(x)
-            tf.logging.info(f'image after init {x.get_shape()}')
+            tf.logging.info('image after init {}'.format(x.get_shape()))
 
         with tf.variable_scope('cnn_1'):
             x = self._batch_norm('bn', x)
-            x = self._conv('conv', x, cnn_kernel_size,
+            x = self._conv('conv', x, cnn_kernel_size[0],
                            filters[1], filters[2], self._stride_arr(strides[0]), padding=padding)
             x = self._relu(x)
-            tf.logging.info(f'image after cnn_1 {x.get_shape()}')
+            tf.logging.info('image after cnn_1 {}'.format(x.get_shape()))
 
         with tf.variable_scope('cnn_2'):
             x = self._batch_norm('bn', x)
-            x = self._conv('conv', x, cnn_kernel_size,
-                           filters[2], filters[3], self._stride_arr(strides[0]), padding=padding)
+            x = self._conv('conv', x, cnn_kernel_size[1],
+                           filters[2], filters[3], self._stride_arr(strides[1]), padding="SAME")
             x = self._relu(x)
-            tf.logging.info(f'image after cnn_2 {x.get_shape()}')
+            tf.logging.info('image after cnn_2 {}'.format(x.get_shape()))
 
         with tf.variable_scope('fc_1'):
             x = self._batch_norm('bn', x)
             x = self._fully_connected(x, 392)
             x = self._relu(x)
-            tf.logging.info(f'image after fc_1 {x.get_shape()}')
+            tf.logging.info('image after fc_1 {}'.format(x.get_shape()))
 
         with tf.variable_scope('fc_2'):
             x = self._batch_norm('bn', x)
             x = tf.nn.dropout(x, keep_prob=0.5)
-            x = self._fully_connected(x, self.hps.num_classes)
-            logits = tf.squeeze(x)
-            y_pred = tf.nn.softmax(logits)
-            tf.logging.info(f'image after fc_2 {x.get_shape()}')
+            x = self._fully_connected(x, self.hps.num_labels)
+            #logits = tf.squeeze(x)
+            #y_pred = tf.nn.softmax(logits)
+            self.y_pred = tf.squeeze(x)
+            tf.logging.info('image after fc_2 {}'.format(x.get_shape()))
 
         with tf.variable_scope('costs'):
             """Margin loss for Eq.(4). When y_true[i, :] contains not just one `1`, this loss should work too. Not test it."""
-            y_true = self.labels
 
-            ce = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
-                logits=logits, labels=y_true), name='prediction_loss')
+            #ce = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=y_true), name='prediction_loss')
+            self.L, self.y_pred_flipped = cost_tensor(self.y_pred, self.labels)
 
-            cost = ce + self._decay()
-            tf.summary.scalar(f'Total_loss', cost)
-            tf.summary.scalar(f'Prediction_loss', ce)
-
+            cost = self.L + self._decay()
+            tf.summary.scalar('Prediction_loss', self.L)
+            tf.summary.scalar('Total_loss', cost)
+        """
         with tf.variable_scope('acc'):
             correct_prediction = tf.equal(
                 tf.argmax(y_pred, 1), tf.argmax(self.labels, 1))
             self.acc = tf.reduce_mean(
                 tf.cast(correct_prediction, tf.float32), name='accu')
-            tf.summary.scalar(f'accuracy', self.acc)
-
+            tf.summary.scalar('accuracy', self.acc)
+        """
         return cost
+
 
     def _fully_connected(self, x, out_dim, name=''):
         """FullyConnected layer for final output."""
